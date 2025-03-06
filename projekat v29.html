@@ -1,0 +1,1473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Centipede Game</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Press Start 2P', cursive;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 800px; 
+            height: 550px;
+            margin: 0 auto;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #deathScreen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8); 
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 10;
+            display: none;
+            width: 300px;
+        }
+
+        #deathScreen button {
+            background: #ff4757;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-family: 'Press Start 2P', cursive;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        #deathScreen button:hover {
+            background: #ff6b81;
+        }
+
+        .blur {
+            filter: blur(5px);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="550" style="border: 1px solid black;"></canvas>
+        <div id="deathScreen">
+            <h1>Game Over</h1>
+            <p id="finalScore">Score: 0</p>
+            <button id="restartButton">Restart</button>
+        </div>
+    </div>
+<p>WSAD - kretanje<p/>
+<p>SPACE - pucanje</p>
+<p>M - mute</p>
+
+
+</body>
+<script>
+
+// HTML ELEMENTS
+const canvas = document.getElementById("gameCanvas");
+const deathScreen = document.getElementById("deathScreen");
+const finalScore = document.getElementById("finalScore");
+const restartButton = document.getElementById("restartButton");
+
+restartButton.addEventListener("click", () => {
+    location.reload();
+});
+
+
+// GAME SETTINGS
+let currentLevel = 11;
+let playerLives = 3;
+let score = 0;
+
+const shipSize = 10;
+const shipStartX = 400;
+const shipStartY = 430;
+const shipSpeed = 5;
+
+const centipedeSegmentSize = 20;
+
+const screenSize = [800, 420];
+const cellSize = 20;
+const sixthRowFromBottomY = 330;
+const lastRowY = 430
+
+const lifeImageSize = 20;
+const lifeSpacing = 10;
+
+let nextEntityId = 2;
+
+const ctx = canvas.getContext("2d");   
+
+
+// COMPONENT INFORMATION
+const Id = (id) => ({id: id});
+const Position = (x, y) => ({ Position: { x, y } });
+const Velocity = (vx, vy) => ({ Velocity: { vx, vy } });
+
+
+// COMPONENTS
+const Ship = (radius) => ({
+Ship: { radius } 
+});
+const Bullet = (radius) => ({
+    Bullet: { radius }
+});
+const Mushroom = (radius, health, poisoned = false) => ({ 
+    Mushroom: { radius, health, poisoned } 
+});
+const Centipede = (radius, mother_id, daughter_id, movementMode, cooldown = 0, path = []) => ({
+    Centipede: {
+        radius,
+        mother_id,
+        daughter_id,
+        movementMode,
+        cooldown,
+        path,
+        currentFrame: 0,
+        frameTimer: 0,
+    },
+});
+const Spider = (radius) => ({
+    Spider: { radius, currentFrame: 0, frameTimer: 0 },
+});
+const Flea = (radius, spawnChance, health = 2) => ({
+    Flea: { radius, spawnChance, health, currentFrame: 0, frameTimer: 0 },
+});
+const Scorpion = (radius) => ({
+    Scorpion: { radius }
+});
+const Death = (currentFrame = 0, frameTimer = 0) => ({
+    Death: { currentFrame: 0, frameTimer: 0 }
+});
+const ScoreDisplay = (value, x, y, duration) => ({
+    ScoreDisplay: { value, x, y, duration, timestamp: Date.now() }
+});
+
+
+// MUSIC
+let isMuted = false; 
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'm') {
+        isMuted = !isMuted; 
+        toggleMute(isMuted);
+    }
+});
+
+function toggleMute(mute) {
+    backgroundMusic.muted = mute;
+    shootingSound1.muted = mute;
+    shootingSound2.muted = mute;
+    shootingSound3.muted = mute;
+    hitSound1.muted = mute;
+    hitSound2.muted = mute;
+    hitSound3.muted = mute;
+    deathSound.muted = mute;
+    if (mute) {
+        console.log("Game muted");
+    } else {
+        console.log("Game unmuted");
+    }
+}
+
+const backgroundMusic = new Audio('Sound/background music.mp3');
+backgroundMusic.loop = true;
+backgroundMusic.volume = 0.8;
+backgroundMusic.play();
+
+
+const shootingSound1 = new Audio('Sound/shot.wav');
+shootingSound1.volume = 0.3;
+const shootingSound2 = new Audio('Sound/shot.wav');
+shootingSound2.volume = 0.3;
+const shootingSound3 = new Audio('Sound/shot.wav');
+shootingSound3.volume = 0.3;
+
+function playShootingAudio() {
+    if (isMuted) return; 
+
+    if (shootingSound1.paused) {
+    shootingSound1.play();
+    } else if (shootingSound2.paused) {
+    shootingSound2.play();
+    } else if (shootingSound3.paused) {
+    shootingSound3.play();
+    }
+}
+
+
+const hitSound1 = new Audio('Sound/hit.wav');
+hitSound1.volume = 0.3;
+const hitSound2 = new Audio('Sound/hit.wav');
+hitSound2.volume = 0.3;
+const hitSound3 = new Audio('Sound/hit.wav');
+hitSound3.volume = 0.3;
+
+function playHitAudio() {
+    if (isMuted) return;
+
+    if (hitSound1.paused) {
+    hitSound1.play();
+    } else if (hitSound2.paused) {
+    hitSound2.play();
+    } else if (hitSound3.paused) {
+    hitSound3.play();
+    }
+}
+
+
+const deathSound = new Audio('Sound/death.wav');
+
+function playDeathSound() {
+    if (isMuted) return;
+
+    deathSound.play();
+    backgroundMusic.currentTime = 0;
+}    
+
+
+// HELPER FUNCTION FOR LOADING AN IMAGE
+const loadImage = (src) => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.src = src;
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+    });
+};
+
+
+// FUNCTION FOR LOADING ALL OF THE IMAGES
+const loadAllImages = async () => {
+    const imageFolders = ['level1', 'level2'];
+    const imagePromises = [];
+
+    for (const folder of imageFolders) {
+        const basePath = `${folder}/`;
+
+        imagePromises.push(
+            loadImage(`${basePath}gun.png`),
+            loadImage(`${basePath}bullet.png`),
+            loadImage(`${basePath}head1.png`),
+            loadImage(`${basePath}head2.png`), 
+            loadImage(`${basePath}head3.png`),
+            loadImage(`${basePath}head4.png`),
+            loadImage(`${basePath}head5.png`),
+            loadImage(`${basePath}head6.png`),
+            loadImage(`${basePath}head7.png`),
+            loadImage(`${basePath}head8.png`),
+            loadImage(`${basePath}body1.png`),
+            loadImage(`${basePath}body2.png`),
+            loadImage(`${basePath}body3.png`),
+            loadImage(`${basePath}body4.png`),
+            loadImage(`${basePath}body5.png`),
+            loadImage(`${basePath}body6.png`),
+            loadImage(`${basePath}body7.png`),
+            loadImage(`${basePath}body8.png`),
+            loadImage(`${basePath}mushroom1.png`),
+            loadImage(`${basePath}mushroom2.png`),
+            loadImage(`${basePath}mushroom3.png`),
+            loadImage(`${basePath}mushroom4.png`),
+            loadImage(`${basePath}flea1.png`),
+            loadImage(`${basePath}flea2.png`),
+            loadImage(`${basePath}flea3.png`),
+            loadImage(`${basePath}flea4.png`),
+            loadImage(`${basePath}scorpion.png`),
+            loadImage(`${basePath}spider1.png`),
+            loadImage(`${basePath}spider2.png`),
+            loadImage(`${basePath}spider3.png`),
+            loadImage(`${basePath}spider4.png`),
+            loadImage(`${basePath}spider5.png`),
+            loadImage(`${basePath}spider6.png`),
+            loadImage(`${basePath}spider7.png`),
+            loadImage(`${basePath}spider8.png`),
+            loadImage(`${basePath}poisonMushroom1.png`),
+            loadImage(`${basePath}poisonMushroom2.png`),
+            loadImage(`${basePath}poisonMushroom3.png`),
+            loadImage(`${basePath}poisonMushroom4.png`),
+            loadImage(`${basePath}300.png`),
+            loadImage(`${basePath}600.png`),
+            loadImage(`${basePath}900.png`),
+            loadImage(`${basePath}death1.png`),
+            loadImage(`${basePath}death2.png`),
+            loadImage(`${basePath}death3.png`),
+            loadImage(`${basePath}death4.png`),
+            loadImage(`${basePath}death5.png`),
+            loadImage(`${basePath}death6.png`),
+            loadImage(`${basePath}death7.png`),
+        );
+    }
+
+    const allImages = await Promise.all(imagePromises);
+
+    const imagesByFolder = [];
+    for (let i = 0; i < imageFolders.length; i++) {
+        const startIndex = i * 49;
+        imagesByFolder[i] = {
+            shipImage: allImages[startIndex],
+            bulletImage: allImages[startIndex + 1],
+            centipedeHeadImages: [
+                allImages[startIndex + 2],
+                allImages[startIndex + 3],
+                allImages[startIndex + 4],
+                allImages[startIndex + 5],
+                allImages[startIndex + 6],
+                allImages[startIndex + 7],
+                allImages[startIndex + 8],
+                allImages[startIndex + 9],
+            ],
+            centipedeBodyImages: [
+                allImages[startIndex + 10],
+                allImages[startIndex + 11],
+                allImages[startIndex + 12],
+                allImages[startIndex + 13],
+                allImages[startIndex + 14],
+                allImages[startIndex + 15],
+                allImages[startIndex + 16],
+                allImages[startIndex + 17],
+            ],
+            mushroomImages: [
+                allImages[startIndex + 18],
+                allImages[startIndex + 19],
+                allImages[startIndex + 20],
+                allImages[startIndex + 21],
+            ],
+            fleaImages: [
+                allImages[startIndex + 22],
+                allImages[startIndex + 23],
+                allImages[startIndex + 24],
+                allImages[startIndex + 25],
+            ],
+            scorpionImage: allImages[startIndex + 26],
+            spiderImages: [
+                allImages[startIndex + 27],
+                allImages[startIndex + 28],
+                allImages[startIndex + 29],
+                allImages[startIndex + 30],
+                allImages[startIndex + 31],
+                allImages[startIndex + 32],
+                allImages[startIndex + 33],
+                allImages[startIndex + 34],
+            ],
+            poisonedMushroomImages: [
+                allImages[startIndex + 35],
+                allImages[startIndex + 36],
+                allImages[startIndex + 37],
+                allImages[startIndex + 38],
+            ],
+            scoreImages: {
+                300: allImages[startIndex + 39],
+                600: allImages[startIndex + 40],
+                900: allImages[startIndex + 41],
+            },
+            deathImages: [
+                allImages[startIndex + 42],
+                allImages[startIndex + 43],
+                allImages[startIndex + 44],
+                allImages[startIndex + 45],
+                allImages[startIndex + 46],
+                allImages[startIndex + 47],
+                allImages[startIndex + 48],
+            ],
+        };
+    }
+
+    return imagesByFolder;
+};
+
+
+// SCORE DISPLAY
+const scoreDisplaySystem = (entities) => {
+    const currentTime = Date.now();
+
+    const updatedEntities = entities.filter(entity => {
+        if (entity.ScoreDisplay) {
+            return currentTime - entity.ScoreDisplay.timestamp < entity.ScoreDisplay.duration;
+        }
+        return true;
+    });
+
+    return updatedEntities;
+};
+
+
+// HELPER FUNCTION FOR PRESERVING ASPECT RATIO
+const drawImagePreserveAspect = (image, x, y, targetWidth, targetHeight) => {
+    const aspectRatio = image.width / image.height;
+    let drawWidth = targetWidth;
+    let drawHeight = targetHeight;
+
+    if (targetWidth / targetHeight > aspectRatio) {
+        drawWidth = targetHeight * aspectRatio;
+    } else {
+        drawHeight = targetWidth / aspectRatio;
+    }
+
+    const offsetX = (targetWidth - drawWidth) / 2;
+    const offsetY = (targetHeight - drawHeight) / 2;
+
+    ctx.drawImage(image, x + offsetX, y + offsetY, drawWidth, drawHeight);
+};
+
+
+// HELPER FUNCTION FOR DRAWING TEXT                         
+const textAreaHeight = 50;
+
+const drawText = (text, x, y, color = "white", fontSize = "20px", centered = false) => {
+    ctx.fillStyle = color;
+    ctx.font = `${fontSize} 'Press Start 2P', cursive`; // Use the retro font
+    ctx.textAlign = centered ? "center" : "left"; // Set text alignment based on the `centered` parameter
+    ctx.textBaseline = "top";
+    ctx.fillText(text, x, y);
+};
+
+
+// RENDERING SYSTEM
+const renderSystem = (entities, currentLevel) => {
+    if (currentLevel > 0) {
+        currentLevel--;
+    }
+
+    const folderIndex = currentLevel % imagesByFolder.length;
+    const {
+        shipImage,
+        bulletImage,
+        centipedeHeadImages,
+        centipedeBodyImages,
+        mushroomImages,
+        poisonedMushroomImages,
+        fleaImages,
+        scorpionImage,
+        spiderImages,
+        scoreImages,
+        deathImages
+    } = imagesByFolder[folderIndex];
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const drawEntity = (entity, image, radius, scale = 1) => {
+        const shiftedY = entity.Position.y + textAreaHeight;
+        drawImagePreserveAspect(
+            image,
+            entity.Position.x - radius, shiftedY - radius,
+            radius * 2 * scale, radius * 2 * scale
+        );
+    };
+
+    entities.forEach(entity => {
+        switch (true) {
+            case !!entity.Ship:
+                drawEntity(entity, shipImage, entity.Ship.radius);
+                break;
+
+            case !!entity.Bullet:
+                drawEntity(entity, bulletImage, entity.Bullet.radius);
+                break;
+
+            case !!entity.Mushroom:
+                const health = entity.Mushroom.health;
+                const imageIndex = Math.max(0, Math.min(3, 4 - health));
+                const mushroomImageSet = entity.Mushroom.poisoned ? poisonedMushroomImages : mushroomImages;
+                drawEntity(entity, mushroomImageSet[imageIndex], entity.Mushroom.radius, 0.9);
+                break;
+
+            case !!entity.Centipede:
+                const currentFrame = entity.Centipede.currentFrame;
+                const isHead = entity.Centipede.mother_id === null;
+                const centipedeImage = isHead ? centipedeHeadImages[currentFrame] : centipedeBodyImages[currentFrame];
+                drawEntity(entity, centipedeImage, entity.Centipede.radius);
+                break;
+
+            case !!entity.Spider:
+                const spiderFrame = entity.Spider.currentFrame;
+                const spiderImage = spiderImages[spiderFrame];
+                drawEntity(entity, spiderImage, entity.Spider.radius);
+                break;
+
+            case !!entity.Flea:
+                const fleaFrame = entity.Flea.currentFrame;
+                const fleaImage = fleaImages[fleaFrame];
+                drawEntity(entity, fleaImage, entity.Flea.radius);
+                break;
+
+            case !!entity.Scorpion:
+                drawEntity(entity, scorpionImage, entity.Scorpion.radius);
+                break;
+
+            case !!entity.Death:
+                const deathFrame = entity.Death.currentFrame;
+                const deathImage = deathImages[deathFrame];
+                drawEntity(entity, deathImage, 15);
+                break;
+
+            case !!entity.ScoreDisplay:
+                const scoreImage = scoreImages[entity.ScoreDisplay.value];
+                if (scoreImage) {
+                    drawImagePreserveAspect(
+                        scoreImage,
+                        entity.Position.x - 15, entity.Position.y - 15 + textAreaHeight,
+                        30, 30
+                    );
+                }
+                break;
+
+            default:
+                break;
+        }
+    });
+
+    drawText(`Level: ${currentLevel + 1}`, 10, 10);
+    const centerX = canvas.width / 2;
+    drawText(`${score}`, centerX, 10, "white", "20px", true);
+
+    const startX = canvas.width - (playerLives * (lifeImageSize + lifeSpacing));
+
+    Array.from({ length: playerLives }).forEach((_, i) => {
+        const x = startX + i * (lifeImageSize + lifeSpacing);
+        const y = 10;
+
+        drawImagePreserveAspect(
+            shipImage,
+            x, y,
+            lifeImageSize, lifeImageSize
+        );
+    });
+
+    return entities;
+};
+
+
+
+// FUNCTION FOR ENTITY CREATION
+const createEntity = (...components) => Object.assign({}, ...components);
+
+
+// FUNCTION FOR CREATING CENTIPEDE ENTITIES
+const createCentipede = (length, cellSize, startX, startY) => {
+    const initialDirection = Math.random() < 0.5 ? -1 : 1;
+
+    const head = createEntity(
+        Position(startX, startY),
+        Velocity(2 * initialDirection, 0),
+        Centipede(cellSize / 2, null, nextEntityId + 1, "downward"),
+        Id(nextEntityId++),
+        { path: [{ x: startX, y: startY }] }
+    );
+
+    const bodySegments = Array.from({ length: length - 1 }, (_, i) => {
+        const isLastSegment = i === length - 2;
+        const mother_id = i === 0 ? head.id : nextEntityId - 1;
+        const daughter_id = isLastSegment ? null : nextEntityId + 1;
+
+        return createEntity(
+            Position(startX, startY),
+            Velocity(2 * initialDirection, 0),
+            Centipede(cellSize / 2, mother_id, daughter_id),
+            Id(nextEntityId++),
+            { path: [{ x: startX, y: startY }] }
+        );
+    });
+    return [head, ...bodySegments];
+};
+
+
+// FUNCTION FOR CREATING MUSHROOM ENTITIES
+const createMushroom = (x, y) => {
+    return createEntity(
+        Position(x, y),
+        Mushroom(cellSize / 2, 4),
+        Id(nextEntityId++)
+    );
+}
+
+// FUNCTION FOR CREATING DEATH ENTITIES
+const createDeathEntity = (x, y) => {
+    return createEntity(
+        Position(x, y),
+        Velocity(0, 0),
+        Death(),
+        Id(nextEntityId++)
+    );
+}
+
+
+// FUNCTION FOR GENERATING MUSHROOMS
+const generateMushrooms = (count) => {
+    const cellSize = 20;
+    const gridWidth = 41;
+    const gridHeight = 20;
+
+    const usedCells = new Set();
+
+    return Array(count).fill().map(() => {
+        let x, y;
+        do {
+            x = Math.floor(Math.random() * gridWidth);
+            y = Math.floor(Math.random() * gridHeight) + 1;
+        } while (usedCells.has(`${x},${y}`));
+
+        usedCells.add(`${x},${y}`);
+        return createEntity(
+            Position(x * cellSize + cellSize / 2, y * cellSize + cellSize / 2),
+            Mushroom(cellSize / 2, 4),
+            Id(nextEntityId++)
+        );
+    });
+};
+
+// CREATE SHIP, GENERATE MUSHROOMS AND INIT ENTITIES
+const ship = createEntity(Position(400, 430), Velocity(2, 2), Ship(shipSize), Id(1));
+let entities = [ship, ...generateMushrooms(70)];
+
+
+// FUNCTION FOR PROCEDURAL GENERATION OF CENTIPEDES FOR THE CURRENT LEVEL
+const generateCentipedesForLevel = (currentLevel) => {
+    const centipedes = [];
+
+    const completeCentipedes = Math.floor((currentLevel - 1) / 12) + 1;
+
+    const finalCentipedeLength = (currentLevel - 1) % 12;
+
+    const totalCentipedes = completeCentipedes + (finalCentipedeLength > 0 ? 1 : 0);
+
+    const partWidth = canvas.width / (totalCentipedes + 1);
+    // ELIMINATE FOR LOOP
+    for (let i = 0; i < totalCentipedes; i++) {
+        const x = partWidth * (i + 1);
+        const y = 30;
+
+        const length = (i < completeCentipedes) ? 12 : finalCentipedeLength;
+
+        centipedes.push(...createCentipede(length, centipedeSegmentSize, x, y));
+    }
+
+    return centipedes;
+};
+
+
+// FUNCTION FOR SPIDER SPAWNING
+let lastSpiderSpawnTime = Date.now();
+const SPIDER_SPAWN_INTERVAL = 10000; // 10 seconds
+
+const spiderSpawnSystem = (entities) => {
+    const currentTime = Date.now();
+
+    if (currentLevel >= 2 && currentTime - lastSpiderSpawnTime >= SPIDER_SPAWN_INTERVAL) {
+        const spawnSide = Math.random() < 0.5 ? 'left' : 'right';
+        const y = Math.floor(Math.random() * 4) * 20 + 350;
+        const x = spawnSide === 'left' ? -20 : canvas.width + 20;
+
+        const vx = spawnSide === 'left' ? 2 : -2;
+        const vy = -2;
+
+        const spider = createEntity(
+            Position(x, y),
+            Velocity(vx, vy),
+            Spider(20),
+            Id(nextEntityId++)
+        );
+
+        lastSpiderSpawnTime = currentTime;
+        return [...entities, spider];
+    }
+
+    return entities;
+};
+
+
+// FUNCTION FOR FLEA SPAWNING
+let lastFleaSpawnTime = Date.now();
+const FLEA_SPAWN_INTERVAL = 30000; // 30 seconds
+
+const fleaSpawnSystem = (entities) => {
+    const currentTime = Date.now();
+
+    if (currentLevel >= 3) {
+        const levelFactor = Math.floor((currentLevel - 3) / 3);
+        const spawnInterval = SCORPION_SPAWN_INTERVAL / (1 + levelFactor * 0.5);
+
+        if (currentTime - lastFleaSpawnTime >= spawnInterval) {
+            const x = Math.floor(Math.random() * 40) * 20 + 10;
+            const y = 30
+
+            const flea = createEntity(
+                Position(x, y),
+                Velocity(0, 4),
+                Flea(10, 0.1),
+                Id(nextEntityId++)
+            );
+            lastFleaSpawnTime = currentTime;
+            return [...entities, flea];
+        }
+    }
+
+    return entities;
+};
+
+
+// FUNCTION FOR SCORPION SPAWNING
+let lastScorpionSpawnTime = Date.now();
+const SCORPION_SPAWN_INTERVAL = 40000; // 40 seconds
+
+const scorpionSpawnSystem = (entities) => {
+    const currentTime = Date.now();
+
+    if (currentLevel >= 4) {
+        const levelFactor = Math.floor((currentLevel - 4) / 4);
+        const spawnInterval = SCORPION_SPAWN_INTERVAL / (1 + levelFactor * 0.5);
+
+        if (currentTime - lastScorpionSpawnTime >= spawnInterval) {
+            const spawnSide = Math.random() < 0.5 ? 'left' : 'right';
+            const y = Math.floor(Math.random() * 5 + 3) * 20 + 10;
+            const x = spawnSide === 'left' ? -20 : canvas.width + 20;
+
+            const scorpion = createEntity(
+                Position(x, y),
+                Velocity(spawnSide === 'left' ? 5 : -5, 0),
+                Scorpion(10, 2),
+                Id(nextEntityId++)
+            );
+
+            lastScorpionSpawnTime = currentTime;
+            return [...entities, scorpion];
+        }
+    }
+
+    return entities;
+};
+
+
+// HELPER FUNCTION FOR COLLISION DETECTION
+const checkCollision = (entity1, entity2) => {
+    if (!entity1.Position || !entity2.Position) return false;
+
+    const radius1 = entity1.Ship?.radius || 
+                   entity1.Bullet?.radius || 
+                   entity1.Centipede?.radius || 
+                   entity1.Mushroom?.radius || 
+                   entity1.Flea?.radius || 
+                   entity1.Spider?.radius || 
+                   0;
+
+    const radius2 = entity2.Ship?.radius || 
+                   entity2.Bullet?.radius || 
+                   entity2.Centipede?.radius || 
+                   entity2.Mushroom?.radius || 
+                   entity2.Flea?.radius || 
+                   entity2.Spider?.radius || 
+                   0;
+
+    const dx = entity1.Position.x - entity2.Position.x;
+    const dy = entity1.Position.y - entity2.Position.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    return distance < radius1 + radius2;
+};
+
+
+// SYSTEM FOR SHIP MOVEMENT
+const keyState = {};
+window.addEventListener('keydown', e => (keyState[e.key] = true));
+window.addEventListener('keyup', e => (keyState[e.key] = false));
+
+const shipControlSystem = (entities) => {
+    newEntities = entities.map(entity => {
+        if (entity.Ship && entity.Position) {
+            let newY = entity.Position.y;
+            let newX = entity.Position.x;
+
+            const isValidMove = (x, y) => {
+                return !entities.some(otherEntity => {
+                    if (otherEntity.Mushroom) {
+                        const tempEntity = { ...entity, Position: { x, y } };
+                        return checkCollision(tempEntity, otherEntity);
+                    }
+                    return false;
+                });
+            };
+
+            if (entity.id == 1) {
+                if (entity.Position.y > 330 && keyState['w']) {
+                    const tempY = entity.Position.y - shipSpeed;
+                    if (isValidMove(entity.Position.x, tempY)) {
+                        newY = tempY;
+                    }
+                }
+                if (entity.Position.y < screenSize[1] + shipSize && keyState['s']) {
+                    const tempY = entity.Position.y + shipSpeed;
+                    if (isValidMove(entity.Position.x, tempY)) {
+                        newY = tempY;
+                    }
+                }
+                if (entity.Position.x > shipSize && keyState['a']) {
+                    const tempX = entity.Position.x - shipSpeed;
+                    if (isValidMove(tempX, entity.Position.y)) {
+                        newX = tempX;
+                    }
+                }
+                if (entity.Position.x < screenSize[0] - shipSize && keyState['d']) {
+                    const tempX = entity.Position.x + shipSpeed;
+                    if (isValidMove(tempX, entity.Position.y)) {
+                        newX = tempX;
+                    }
+                }
+            }
+
+            return { ...entity, Position: { x: newX, y: newY } };
+        }
+        return entity;
+    });
+    return newEntities;
+}
+
+
+// BULLET FIREING SYSTEM
+let lastFireTime = 0;
+const FIRE_RATE = 200;
+
+const bulletSystem = (entities) => {
+    const currentTime = Date.now();
+    const shipPositions = entities
+        .filter(e => e.Ship && e.Position)
+        .map(e => ({ x: e.Position.x, y: e.Position.y }));
+
+    let spawnedMushrooms = [];
+    let deathEntities = [];
+    let spawnedBullet = [];
+    let scoreDisplayEntities = [];
+
+    if (keyState[' '] && currentTime - lastFireTime >= FIRE_RATE) {
+        const pos = shipPositions[0];
+
+        // CREATE BULLET ENTITY
+        const bullet = createEntity(
+            Position(pos.x, pos.y),
+            Velocity(0, -10),
+            Bullet(3),
+            Id(nextEntityId++)
+        );
+        spawnedBullet.push(bullet);
+        lastFireTime = currentTime;
+
+        playShootingAudio();
+    }
+
+    const addScore = (scoreToAdd, x, y) => {
+        score += scoreToAdd;
+        const scoreDisplay = createEntity(
+            Position(x, y),
+            ScoreDisplay(scoreToAdd, x, y, 3000), // 3000ms = 3 seconds
+            Id(nextEntityId++)
+        );
+        scoreDisplayEntities.push(scoreDisplay);
+    };
+
+    const newEntities = entities.filter(entity => {
+        if (entity.Bullet) {
+            entity.Position.y += entity.Velocity.vy;
+
+            // MUSHROOM COLLISION
+            const collidesWithMushroom = entities.some(otherEntity => {
+                if (otherEntity.Mushroom) {
+                    if (checkCollision(entity, otherEntity)) {
+                        otherEntity.Mushroom.health -= 1;
+                        if (otherEntity.Mushroom.health <= 0) {
+                            score += 1;
+                            return true;
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            });
+
+            // CENTIPEDE COLLISION
+            const collidesWithCentipede = entities.some(otherEntity => {
+                if (otherEntity.Centipede) {
+                    if (checkCollision(entity, otherEntity)) {
+                        const gridX = Math.round(otherEntity.Position.x / cellSize) * cellSize;
+
+                        // CREATE DEATH ENTITY
+                        deathEntity = createDeathEntity(otherEntity.Position.x, otherEntity.Position.y);
+                        deathEntities.push(deathEntity);
+
+                        playHitAudio();
+
+                        // CREATE MUSHROOM ENTITY
+                        const newMushroom = createMushroom(gridX + cellSize / 2, otherEntity.Position.y);
+                        spawnedMushrooms.push(newMushroom);
+
+                        if (otherEntity.Centipede.mother_id === null) {
+                            score += 100;
+                        } else {
+                            score += 10;
+                        }
+
+                        // PROMOTE NEW HEAD
+                        if (otherEntity.Centipede.daughter_id !== null) {
+                            const daughter = entities.find(e => e.id === otherEntity.Centipede.daughter_id);
+
+                            if (daughter) {
+                                const path = otherEntity.path || [];
+
+                                if (path.length >= 2) {
+                                    const lastPosition = path[path.length - 1];
+                                    const secondLastPosition = path[path.length - 2];
+
+                                    const dx = lastPosition.x - secondLastPosition.x;
+                                    const direction = dx > 0 ? 1 : -1;
+                                    daughter.Velocity = { vx: 2 * direction, vy: 0 };
+                                } else {
+                                    daughter.Velocity = { vx: 2, vy: 0 };
+                                }
+                                daughter.Centipede.mother_id = null;
+                                daughter.path = [{ x: daughter.Position.x, y: daughter.Position.y }];
+                            }
+                        }
+                        otherEntity.toBeRemoved = true;
+                        return true;
+                    }
+                }
+                return false;
+            });
+
+            // SPIDER COLLISION
+            const collidesWithSpider = entities.some(otherEntity => {
+                if (otherEntity.Spider) {
+                    if (checkCollision(entity, otherEntity)) {
+                        deathEntity = createDeathEntity(otherEntity.Position.x, otherEntity.Position.y);
+                        deathEntities.push(deathEntity);
+
+                        playHitAudio();
+
+                        addScore(600, otherEntity.Position.x, otherEntity.Position.y);
+
+                        otherEntity.toBeRemoved = true;
+                        return true;
+                    }
+                }
+                return false;
+            });
+
+            // FLEA COLLISION
+            const collidesWithFlea = entities.some(otherEntity => {
+                if (otherEntity.Flea) {
+                    if (checkCollision(entity, otherEntity)) {
+                        deathEntity = createDeathEntity(otherEntity.Position.x, otherEntity.Position.y);
+                        deathEntities.push(deathEntity);
+
+                        playHitAudio();
+
+                        otherEntity.Flea.health -= 1;
+
+                        if (otherEntity.Flea.health <= 0) {
+                            addScore(300, otherEntity.Position.x, otherEntity.Position.y);
+                            otherEntity.toBeRemoved = true;
+                        }
+                    }
+                }
+                return false;
+            });
+
+            // SCORPION COLLISION
+            const collidesWithScorpion = entities.some(otherEntity => {
+                if (otherEntity.Scorpion) {
+                    if (checkCollision(entity, otherEntity)) {
+                        deathEntity = createDeathEntity(otherEntity.Position.x, otherEntity.Position.y);
+                        deathEntities.push(deathEntity);
+
+                        playHitAudio();
+
+                        addScore(900, otherEntity.Position.x, otherEntity.Position.y);
+
+                        otherEntity.toBeRemoved = true;
+                        return true;
+                    }
+                }
+                return false;
+            });
+
+            return !collidesWithMushroom && !collidesWithCentipede && !collidesWithFlea && !collidesWithScorpion && !collidesWithSpider && entity.Position.y > 0;
+        }
+        return true;
+    });
+
+    let finalEntities = newEntities.filter(entity => {
+        return !(entity.Mushroom && entity.Mushroom.health <= 0) && !entity.toBeRemoved;
+    });
+
+    finalEntities = [...finalEntities, ...spawnedMushrooms, ...deathEntities, ...spawnedBullet, ...scoreDisplayEntities];
+    return finalEntities;
+};
+
+
+// HELPER FUNCTION FOR CHECKING COLLISIONS
+const checkCollisionsWithEnemies = (shipEntity, entities, enemyTypes) => {
+    return entities.some(entity => {
+        const isEnemy = enemyTypes.some(type => entity[type]);
+        return isEnemy && checkCollision(shipEntity, entity);
+    });
+};
+
+
+// DEATH SYSTEM
+const deathSystem = (entities) => {
+    const shipEntity = entities.find(entity => entity.Ship);
+
+    if (shipEntity) {
+        const enemyTypes = ['Centipede', 'Flea', 'Spider'];
+
+        const collidesWithEnemy = checkCollisionsWithEnemies(shipEntity, entities, enemyTypes);
+
+        if (collidesWithEnemy) {
+            playerLives--;
+
+            const deathEntity = createDeathEntity(shipEntity.Position.x, shipEntity.Position.y)
+            entities.push(deathEntity);
+
+            if (playerLives >= 0) {            
+                playDeathSound();
+            }
+            if (playerLives <= 0) {
+                finalScore.textContent = `Score: ${score}`;
+                deathScreen.style.display = "block";
+                canvas.classList.add("blur");
+
+                return entities;
+            } else {
+                shipEntity.Position.x = shipStartX;
+                shipEntity.Position.y = shipStartY;
+
+                entities = entities.filter(e => !e.Centipede && !e.Flea && !e.Spider);
+
+                currentLevel--;
+            }
+        }
+    }
+
+    return entities;
+};
+
+
+// INCREASE LEVEL IF NO MORE CENTIPEDES
+const levelSystem = (entities) => {
+    const centipedesRemaining = entities.some(entity => entity.Centipede);
+
+    if (!centipedesRemaining) {
+        entities = entities.concat(generateCentipedesForLevel(currentLevel + 1));
+        currentLevel++;
+    }
+
+    return entities;
+};
+
+    
+let lastCentipedeSpawnTime = Date.now();
+const CENTIPEDE_SPAWN_COOLDOWN = 7000; // 7 seconds
+
+const centipedeMovementSystem = (entities) => {
+    const centipedeEntities = entities.filter(e => e.Centipede);
+    const heads = centipedeEntities.filter(e => e.Centipede.mother_id === null);
+
+
+    heads.forEach(head => {
+        if (!head.path) {
+            head.path = [{ x: head.Position.x, y: head.Position.y }];
+        }
+
+        head.path.push({ x: head.Position.x, y: head.Position.y });
+
+        if (head.movementMode === undefined) {
+            head.movementMode = "downward";
+        }
+
+        const newHeadX = head.Position.x + head.Velocity.vx * (head.Centipede.mother_id === null ? 1 : -1);
+        const newHeadY = head.Position.y;
+
+        const isInCooldown = head.cooldown && head.cooldown > 0;
+
+        const collidesWithMushroom = !isInCooldown && entities.some(otherEntity => {
+            if (otherEntity.Mushroom) {
+                const tempHead = { ...head, Position: { x: newHeadX, y: newHeadY } };
+                return checkCollision(tempHead, otherEntity);
+            }
+            return false;
+        });
+
+        const collidesWithCentipede = !isInCooldown && entities.some(otherEntity => {
+            if (otherEntity.Centipede && otherEntity.id !== head.id) {
+                const tempHead = { ...head, Position: { x: newHeadX, y: newHeadY } };
+                return checkCollision(tempHead, otherEntity);
+            }
+            return false;
+        });
+
+        if (
+            newHeadX <= head.Centipede.radius || // Left wall
+            newHeadX >= screenSize[0] - head.Centipede.radius || // Right wall
+            collidesWithMushroom || // Mushroom collision
+            collidesWithCentipede // Centipede collision
+        ) {
+            head.Velocity.vx *= -1; // Reverse horizontal direction
+
+            if (head.movementMode === "downward") {
+                head.Position.y += 20; // Move down
+                if (head.Position.y >= lastRowY) {
+                    head.movementMode = "upward";
+                    head.Position.y = lastRowY;
+
+                    // Check if enough time has passed since the last centipede spawn
+                    const currentTime = Date.now();
+                    if (currentTime - lastCentipedeSpawnTime >= CENTIPEDE_SPAWN_COOLDOWN) {
+                        // Spawn a new 1-segment centipede when the centipede reaches the bottom row
+                        const spawnSide = Math.random() < 0.5 ? 'left' : 'right'; // Randomly choose left or right
+                        const newCentipedeX = spawnSide === 'left' ? 20 : canvas.width - 20; // Spawn at the edge of the screen
+                        const newCentipedeVelocity = spawnSide === 'left' ? 2 : -2; // Move left or right
+                        if (playerLives > 0) {
+                        const newCentipede = createEntity(
+                            Position(newCentipedeX, lastRowY), // Position at the bottom row
+                            Velocity(newCentipedeVelocity, 0), // Velocity (horizontal only)
+                            Centipede(head.Centipede.radius, null, null, "downward"), // 1-segment centipede
+                            Id(nextEntityId++),
+                            { path: [{ x: newCentipedeX, y: lastRowY }] } // Initialize path for the new centipede
+                        );
+
+                        entities.push(newCentipede); // Add the new centipede to the entities list
+                        }
+                        lastCentipedeSpawnTime = currentTime; // Update the last spawn time
+                    }
+                }
+            } else {
+                head.Position.y -= 20; // Move up
+                if (head.Position.y <= sixthRowFromBottomY) {
+                    head.movementMode = "downward";
+                    head.Position.y = sixthRowFromBottomY;
+                }
+            }
+
+            head.cooldown = 10; // Set cooldown to prevent immediate direction changes
+        } else {
+            head.Position.x = newHeadX; // Move horizontally
+        }
+
+        // Update movement mode for all segments
+        centipedeEntities.forEach(segment => {
+            if (segment.Centipede.mother_id === null) {
+                // Head segment
+                if (segment.Position.y >= lastRowY) {
+                    segment.Centipede.movementMode = "upward";
+                } else if (segment.Position.y <= sixthRowFromBottomY) {
+                    segment.Centipede.movementMode = "downward";
+                }
+            } else {
+                // Body segment: inherit movement mode from the head
+                const mother = centipedeEntities.find(e => e.id === segment.Centipede.mother_id);
+                if (mother) {
+                    segment.Centipede.movementMode = mother.Centipede.movementMode;
+                }
+            }
+        });
+
+        if (head.cooldown && head.cooldown > 0) {
+            head.cooldown--; // Decrease cooldown
+        }
+        if (head.path.length > 1000) {
+            head.path = head.path.slice(-1000); // Limit path length
+        }
+    });
+
+    // Update body segments to follow their mother segments
+    centipedeEntities.filter(e => e.Centipede.mother_id !== null).forEach(body => {
+        const [mother] = centipedeEntities.filter(e => e.id === body.Centipede.mother_id);
+        if (mother && mother.path) {
+            body.path = body.path || [];
+
+            const pathIndex = mother.path.length - 10;
+            if (pathIndex >= 0 && pathIndex < mother.path.length) {
+                const targetPosition = mother.path[pathIndex];
+                body.Position.x = targetPosition.x;
+                body.Position.y = targetPosition.y;
+            }
+
+            body.path.push({ x: body.Position.x, y: body.Position.y });
+
+            if (body.path.length > 100) {
+                body.path = body.path.slice(-100); // Limit path length
+            }
+        }
+    });
+
+    return entities;
+};
+
+
+// FLEA MOVEMENT LOGIC
+const fleaMovementSystem = (entities) => {
+    const fleas = entities.filter(entity => entity.Flea);
+
+    const isCellEmpty = (gridX, gridY) => {
+        const mushrooms = entities.filter(entity => entity.Mushroom && entity.Position);
+        return !mushrooms.some(mushroom =>
+            Math.floor(mushroom.Position.x / cellSize) * cellSize === gridX &&
+            Math.floor(mushroom.Position.y / cellSize) * cellSize === gridY
+        );
+    };
+
+    
+    mushroomsToAdd = [];
+
+    newEntities = entities.filter(entity => {
+        if (entity.Flea && entity.Position) {
+            entity.Position.y += entity.Velocity.vy;
+
+            if (Math.random() < 0.02) {
+                const gridX = Math.floor(entity.Position.x / cellSize) * cellSize;
+                const gridY = Math.floor(entity.Position.y / cellSize) * cellSize;
+
+                if (gridY <= lastRowY && isCellEmpty(gridX, gridY)) {
+                    const newMushroom = createMushroom(gridX + cellSize / 2, gridY + cellSize / 2);                
+                    mushroomsToAdd.push(newMushroom);
+                }
+            }
+
+            return entity.Position.y <= canvas.height;
+        }
+
+        return true;
+    });
+    return [...newEntities, ...mushroomsToAdd];
+
+};
+
+
+// SCORPION MOVEMENT LOGIC
+const scorpionMovementSystem = (entities) => {
+    const mushrooms = entities.filter(entity => entity.Mushroom && entity.Position);
+
+    const updatedEntities = entities.map(entity => {
+        if (entity.Scorpion && entity.Position) {
+            const updatedScorpion = {
+                ...entity,
+                Position: {
+                    ...entity.Position,
+                    x: entity.Position.x + entity.Velocity.vx,
+                },
+                toBeRemoved: false,
+            };
+
+            const poisonedMushroom = mushrooms.find(mushroom =>
+                checkCollision(updatedScorpion, mushroom)
+            );
+
+            if (poisonedMushroom) {
+                poisonedMushroom.Mushroom.poisoned = true;
+            }
+
+            if (updatedScorpion.Position.x < -20 || updatedScorpion.Position.x > canvas.width + 20) {
+                updatedScorpion.toBeRemoved = true;
+            }
+
+            return updatedScorpion;
+        }
+
+        return entity;
+    });
+
+    return updatedEntities.filter(entity => !entity.toBeRemoved);
+};
+
+
+// SPIDER MOVEMENT LOGIC
+const spiderMovementSystem = (entities) => {
+    const spiderEntities = entities.filter(e => e.Spider);
+
+    const DIP_PROBABILITY = 0.003; // 0.3% chance per frame
+    const DIP_COOLDOWN = 10000; // 10 seconds
+
+    spiderEntities.forEach(spider => {
+        const { Velocity, Position } = spider;
+
+        const updatedEntities = entities.map(otherEntity => {
+            if (otherEntity.Mushroom && checkCollision(spider, otherEntity)) {
+                if (Math.random() < 0.007) {
+                    otherEntity.toBeRemoved = true;
+                }
+            }
+            return otherEntity;
+        });
+
+
+        if (!spider.movementMode) {
+            const spawnY = Position.y;
+
+            if (Math.random() < 0.5) {
+                spider.movementMode = "full5";
+            } else if (spawnY <= sixthRowFromBottomY + 2 * cellSize) {
+                spider.movementMode = "top4";
+            } else {
+                spider.movementMode = "bot4";
+            }
+        }
+
+        const currentTime = Date.now();
+        const canPerformDip =
+            spider.movementMode !== "randomDip" &&
+            Math.random() < DIP_PROBABILITY &&
+            (!spider.lastDipTime || currentTime - spider.lastDipTime >= DIP_COOLDOWN);
+
+        if (canPerformDip) {
+            spider.movementMode = "randomDip";
+            spider.dipState = "down";
+            spider.lastDipTime = currentTime;
+        }
+
+        switch (spider.movementMode) {
+            case "full5":
+                topBoundary = sixthRowFromBottomY;
+                bottomBoundary = lastRowY;
+                break;
+            case "top4":
+                topBoundary = sixthRowFromBottomY;
+                bottomBoundary = lastRowY - 2 * cellSize;
+                break;
+            case "bot4":
+                topBoundary = sixthRowFromBottomY + 2 * cellSize;
+                bottomBoundary = lastRowY;
+                break;
+            case "randomDip":
+                if (spider.dipState === "down") {
+
+                    Position.y += Math.abs(Velocity.vy);
+                    if (Position.y >= lastRowY) {
+                        Position.y = lastRowY;
+                        spider.dipState = "up";
+                    }
+                } else if (spider.dipState === "up") {
+
+                    Position.y -= Math.abs(Velocity.vy);
+                    if (Position.y <= sixthRowFromBottomY) {
+                        Position.y = sixthRowFromBottomY;
+                        spider.dipState = "downToRandom";
+
+                        const bottomRowsStart = lastRowY - 4 * cellSize;
+                        spider.targetY = bottomRowsStart + Math.floor(Math.random() * 5) * cellSize;
+                    }
+                } else if (spider.dipState === "downToRandom") {
+
+                    Position.y += Math.abs(Velocity.vy);
+                    if (Position.y >= spider.targetY) {
+                        Position.y = spider.targetY;
+                        spider.movementMode = null;
+                        spider.dipState = null;
+                    }
+                }
+                break;
+            default:
+                topBoundary = sixthRowFromBottomY;
+                bottomBoundary = lastRowY;
+        }
+
+        if (spider.movementMode !== "randomDip") {
+            Position.x += Velocity.vx;
+            Position.y += Velocity.vy;
+
+            if (Position.y <= topBoundary || Position.y >= bottomBoundary) {
+                Velocity.vy *= -1;
+            }
+        }
+
+        if (Position.x < -20 || Position.x > canvas.width + 20) {
+            spider.toBeRemoved = true;
+        }
+    });
+
+    return entities.filter(entity => !entity.toBeRemoved);
+};
+
+
+// SYSTEM FOR ANIMATION HANDLING
+const animationSystem = (entities) => {
+
+    const ANIMATION_CONFIG = {
+        Flea: { frameCount: 4, frameDuration: 100 },
+        Spider: { frameCount: 8, frameDuration: 100 },
+        Centipede: { frameCount: 8, frameDuration: 100 },
+        Death: { frameCount: 7, frameDuration: 100, isDeath: true }
+    };
+
+    const updatedEntities = entities.filter(entity => {
+        const entityType = Object.keys(entity).find(key => ANIMATION_CONFIG[key]);
+        if (!entityType) return true;
+
+        const config = ANIMATION_CONFIG[entityType];
+        const animationComponent = entity[entityType];
+
+        animationComponent.frameTimer += 16;
+
+        if (animationComponent.frameTimer >= config.frameDuration) {
+            animationComponent.currentFrame = (animationComponent.currentFrame + 1) % config.frameCount;
+            animationComponent.frameTimer = 0;
+
+            if (config.isDeath && animationComponent.currentFrame >= config.frameCount - 1) {
+                return false;
+            }
+        }
+
+        return true;
+    });
+
+    return updatedEntities;
+};
+
+
+const systems = [
+    (entities) => renderSystem(entities, currentLevel),
+    shipControlSystem,
+    bulletSystem,
+    fleaMovementSystem,
+    fleaSpawnSystem,
+    scorpionSpawnSystem,
+    scorpionMovementSystem,
+    spiderSpawnSystem,
+    spiderMovementSystem,
+    centipedeMovementSystem,
+    levelSystem,
+    deathSystem,
+    scoreDisplaySystem,
+    animationSystem
+];
+
+
+const updateGame = (entities, systems) =>
+    systems.reduce((currentEntities, system) => system(currentEntities), entities);
+
+
+function gameLoop(){
+    entities = updateGame(entities, systems);
+    requestAnimationFrame(gameLoop);
+}
+
+
+let imagesByLevel = [];
+
+const startGame = async () => {
+    imagesByFolder = await loadAllImages();
+    gameLoop();
+};
+
+startGame();
+
+</script>
+</html>
