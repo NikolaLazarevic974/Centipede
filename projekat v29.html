@@ -86,7 +86,7 @@ restartButton.addEventListener("click", () => {
 
 
 // GAME SETTINGS
-let currentLevel = 11;
+let currentLevel = 0;
 let playerLives = 3;
 let score = 0;
 
@@ -124,7 +124,7 @@ const Bullet = (radius) => ({
     Bullet: { radius }
 });
 const Mushroom = (radius, health, poisoned = false) => ({ 
-    Mushroom: { radius, health, poisoned } 
+    Mushroom: { radius, health, poisoned} 
 });
 const Centipede = (radius, mother_id, daughter_id, movementMode, cooldown = 0, path = []) => ({
     Centipede: {
@@ -150,8 +150,8 @@ const Scorpion = (radius) => ({
 const Death = (currentFrame = 0, frameTimer = 0) => ({
     Death: { currentFrame: 0, frameTimer: 0 }
 });
-const ScoreDisplay = (value, x, y, duration) => ({
-    ScoreDisplay: { value, x, y, duration, timestamp: Date.now() }
+const ScoreDisplay = (value, duration) => ({
+    ScoreDisplay: { value, duration, timestamp: Date.now() }
 });
 
 
@@ -249,7 +249,7 @@ const loadImage = (src) => {
 
 // FUNCTION FOR LOADING ALL OF THE IMAGES
 const loadAllImages = async () => {
-    const imageFolders = ['level1', 'level2'];
+    const imageFolders = ['level1', 'level2', 'level3', 'level4', 'level5'];
     const imagePromises = [];
 
     for (const folder of imageFolders) {
@@ -425,8 +425,8 @@ const textAreaHeight = 50;
 
 const drawText = (text, x, y, color = "white", fontSize = "20px", centered = false) => {
     ctx.fillStyle = color;
-    ctx.font = `${fontSize} 'Press Start 2P', cursive`; // Use the retro font
-    ctx.textAlign = centered ? "center" : "left"; // Set text alignment based on the `centered` parameter
+    ctx.font = `${fontSize} 'Press Start 2P', cursive`; 
+    ctx.textAlign = centered ? "center" : "left";
     ctx.textBaseline = "top";
     ctx.fillText(text, x, y);
 };
@@ -454,17 +454,34 @@ const renderSystem = (entities, currentLevel) => {
     } = imagesByFolder[folderIndex];
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'black';
+    ctx.fillStyle = '#000013';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const drawEntity = (entity, image, radius, scale = 1) => {
-        const shiftedY = entity.Position.y + textAreaHeight;
-        drawImagePreserveAspect(
-            image,
-            entity.Position.x - radius, shiftedY - radius,
-            radius * 2 * scale, radius * 2 * scale
-        );
-    };
+const drawEntity = (entity, image, radius, scale = 1) => {
+    const shiftedY = entity.Position.y + textAreaHeight;
+    const x = entity.Position.x - radius;
+    const y = shiftedY - radius;
+    const width = radius * 2 * scale;
+    const height = radius * 2 * scale;
+
+    // Save the current context state
+    ctx.save();
+
+    // Translate to the center of the entity
+    ctx.translate(x + width / 2, y + height / 2);
+
+    // Calculate the rotation angle based on velocity
+    if (entity.Centipede && entity.Centipede.mother_id === null) {
+        const angle = Math.atan2(-entity.Velocity.vy, -entity.Velocity.vx);
+        ctx.rotate(angle);
+    }
+
+    // Draw the image centered at the translated position
+    drawImagePreserveAspect(image, -width / 2, -height / 2, width, height);
+
+    // Restore the context state
+    ctx.restore();
+};
 
     entities.forEach(entity => {
         switch (true) {
@@ -514,13 +531,7 @@ const renderSystem = (entities, currentLevel) => {
 
             case !!entity.ScoreDisplay:
                 const scoreImage = scoreImages[entity.ScoreDisplay.value];
-                if (scoreImage) {
-                    drawImagePreserveAspect(
-                        scoreImage,
-                        entity.Position.x - 15, entity.Position.y - 15 + textAreaHeight,
-                        30, 30
-                    );
-                }
+                drawEntity(entity, scoreImage, 15)
                 break;
 
             default:
@@ -629,7 +640,7 @@ const generateMushrooms = (count) => {
 
 // CREATE SHIP, GENERATE MUSHROOMS AND INIT ENTITIES
 const ship = createEntity(Position(400, 430), Velocity(2, 2), Ship(shipSize), Id(1));
-let entities = [ship, ...generateMushrooms(70)];
+let entities = [ship, ...generateMushrooms(60)];
 
 
 // FUNCTION FOR PROCEDURAL GENERATION OF CENTIPEDES FOR THE CURRENT LEVEL
@@ -868,7 +879,7 @@ const bulletSystem = (entities) => {
         score += scoreToAdd;
         const scoreDisplay = createEntity(
             Position(x, y),
-            ScoreDisplay(scoreToAdd, x, y, 3000), // 3000ms = 3 seconds
+            ScoreDisplay(scoreToAdd, 3000), // 3000ms = 3 seconds
             Id(nextEntityId++)
         );
         scoreDisplayEntities.push(scoreDisplay);
@@ -878,23 +889,19 @@ const bulletSystem = (entities) => {
         if (entity.Bullet) {
             entity.Position.y += entity.Velocity.vy;
 
-            // MUSHROOM COLLISION
-            const collidesWithMushroom = entities.some(otherEntity => {
+            const collision = entities.some(otherEntity => {
+                // MUSHROOM CHECK AND LOGIC
                 if (otherEntity.Mushroom) {
                     if (checkCollision(entity, otherEntity)) {
                         otherEntity.Mushroom.health -= 1;
                         if (otherEntity.Mushroom.health <= 0) {
                             score += 1;
-                            return true;
                         }
                         return true;
                     }
                 }
-                return false;
-            });
-
-            // CENTIPEDE COLLISION
-            const collidesWithCentipede = entities.some(otherEntity => {
+                
+                // CENTIPEDE CHECK AND LOGIC
                 if (otherEntity.Centipede) {
                     if (checkCollision(entity, otherEntity)) {
                         const gridX = Math.round(otherEntity.Position.x / cellSize) * cellSize;
@@ -906,9 +913,10 @@ const bulletSystem = (entities) => {
                         playHitAudio();
 
                         // CREATE MUSHROOM ENTITY
-                        const newMushroom = createMushroom(gridX + cellSize / 2, otherEntity.Position.y);
-                        spawnedMushrooms.push(newMushroom);
-
+                        if (otherEntity.Centipede.movementMode != "down") {
+                            const newMushroom = createMushroom(gridX + cellSize / 2, otherEntity.Position.y);
+                            spawnedMushrooms.push(newMushroom);
+                        }
                         if (otherEntity.Centipede.mother_id === null) {
                             score += 100;
                         } else {
@@ -918,11 +926,13 @@ const bulletSystem = (entities) => {
                         // PROMOTE NEW HEAD
                         if (otherEntity.Centipede.daughter_id !== null) {
                             const daughter = entities.find(e => e.id === otherEntity.Centipede.daughter_id);
+                            console.log(daughter);
 
-                            if (daughter) {
+                            if (daughter && daughter.Centipede) {
                                 const path = otherEntity.path || [];
-
-                                if (path.length >= 2) {
+                                if (otherEntity.Velocity) {
+                                    daughter.Velocity = otherEntity.Velocity;
+                                } else if (path.length >= 2) {
                                     const lastPosition = path[path.length - 1];
                                     const secondLastPosition = path[path.length - 2];
 
@@ -932,6 +942,7 @@ const bulletSystem = (entities) => {
                                 } else {
                                     daughter.Velocity = { vx: 2, vy: 0 };
                                 }
+                                daughter.Centipede.movementMode = otherEntity.Centipede.movementMode || "downward";
                                 daughter.Centipede.mother_id = null;
                                 daughter.path = [{ x: daughter.Position.x, y: daughter.Position.y }];
                             }
@@ -940,66 +951,44 @@ const bulletSystem = (entities) => {
                         return true;
                     }
                 }
-                return false;
-            });
 
-            // SPIDER COLLISION
-            const collidesWithSpider = entities.some(otherEntity => {
-                if (otherEntity.Spider) {
+                // SPIDER AND SCORPION CHECK AND LOGIC
+                if (otherEntity.Spider || otherEntity.Scorpion) {
                     if (checkCollision(entity, otherEntity)) {
                         deathEntity = createDeathEntity(otherEntity.Position.x, otherEntity.Position.y);
                         deathEntities.push(deathEntity);
 
                         playHitAudio();
 
-                        addScore(600, otherEntity.Position.x, otherEntity.Position.y);
+                        addScore(otherEntity.Spider ? 600 : 900, otherEntity.Position.x, otherEntity.Position.y);
 
                         otherEntity.toBeRemoved = true;
                         return true;
                     }
                 }
-                return false;
-            });
 
-            // FLEA COLLISION
-            const collidesWithFlea = entities.some(otherEntity => {
+                // FLEA LOGIC
                 if (otherEntity.Flea) {
                     if (checkCollision(entity, otherEntity)) {
-                        deathEntity = createDeathEntity(otherEntity.Position.x, otherEntity.Position.y);
-                        deathEntities.push(deathEntity);
 
                         playHitAudio();
 
                         otherEntity.Flea.health -= 1;
 
                         if (otherEntity.Flea.health <= 0) {
+                            deathEntity = createDeathEntity(otherEntity.Position.x, otherEntity.Position.y);
+                            deathEntities.push(deathEntity);
+
                             addScore(300, otherEntity.Position.x, otherEntity.Position.y);
                             otherEntity.toBeRemoved = true;
                         }
-                    }
-                }
-                return false;
-            });
-
-            // SCORPION COLLISION
-            const collidesWithScorpion = entities.some(otherEntity => {
-                if (otherEntity.Scorpion) {
-                    if (checkCollision(entity, otherEntity)) {
-                        deathEntity = createDeathEntity(otherEntity.Position.x, otherEntity.Position.y);
-                        deathEntities.push(deathEntity);
-
-                        playHitAudio();
-
-                        addScore(900, otherEntity.Position.x, otherEntity.Position.y);
-
-                        otherEntity.toBeRemoved = true;
                         return true;
                     }
                 }
                 return false;
             });
 
-            return !collidesWithMushroom && !collidesWithCentipede && !collidesWithFlea && !collidesWithScorpion && !collidesWithSpider && entity.Position.y > 0;
+            return !collision && entity.Position.y > 0;
         }
         return true;
     });
@@ -1073,143 +1062,163 @@ const levelSystem = (entities) => {
     return entities;
 };
 
-    
+
+// HELPER FOR CREATING BOTTOM ROW CENTIPEDES
+const createBottomCentipede = () => {
+    const spawnSide = Math.random() < 0.5 ? 'left' : 'right';
+    const newCentipedeX = spawnSide === 'left' ? 20 : canvas.width - 20;
+    const newCentipedeVelocity = spawnSide === 'left' ? 2 : -2;
+    const newCentipede = createEntity(
+        Position(newCentipedeX, lastRowY),
+        Velocity(newCentipedeVelocity, 0),
+        Centipede(centipedeSegmentSize/2, null, null, "downward"),
+        Id(nextEntityId++),
+        { path: [{ x: newCentipedeX, y: lastRowY }] }
+    );
+    return newCentipede;
+}
+
+// CENTIPEDE MOVEMENT LOGIC
 let lastCentipedeSpawnTime = Date.now();
 const CENTIPEDE_SPAWN_COOLDOWN = 7000; // 7 seconds
 
 const centipedeMovementSystem = (entities) => {
-    const centipedeEntities = entities.filter(e => e.Centipede);
-    const heads = centipedeEntities.filter(e => e.Centipede.mother_id === null);
+    const currentTime = Date.now();
 
+    addedCentipede = [];
 
-    heads.forEach(head => {
-        if (!head.path) {
-            head.path = [{ x: head.Position.x, y: head.Position.y }];
-        }
+    newEntities = entities.map(entity => {
+        if (!entity.Centipede) return entity;
 
-        head.path.push({ x: head.Position.x, y: head.Position.y });
+        // Handle head movement
+        if (entity.Centipede.mother_id === null) {
+            entity.path.push({ x: entity.Position.x, y: entity.Position.y });
 
-        if (head.movementMode === undefined) {
-            head.movementMode = "downward";
-        }
+            const newHeadX = entity.Position.x + entity.Velocity.vx;
+            const newHeadY = entity.Position.y + entity.Velocity.vy;
 
-        const newHeadX = head.Position.x + head.Velocity.vx * (head.Centipede.mother_id === null ? 1 : -1);
-        const newHeadY = head.Position.y;
+            const isInCooldown = entity.cooldown && entity.cooldown > 0;
 
-        const isInCooldown = head.cooldown && head.cooldown > 0;
-
-        const collidesWithMushroom = !isInCooldown && entities.some(otherEntity => {
-            if (otherEntity.Mushroom) {
-                const tempHead = { ...head, Position: { x: newHeadX, y: newHeadY } };
-                return checkCollision(tempHead, otherEntity);
+            // Check collision
+            const collides = !isInCooldown && entities.some(otherEntity => {
+                if (otherEntity.Mushroom || (otherEntity.Centipede && otherEntity.id !== entity.id && otherEntity.Centipede.mother_id !== entity.id)) {
+                    
+                    const tempHead = { ...entity, Position: { x: newHeadX, y: newHeadY } };
+                    if (checkCollision(tempHead, otherEntity)) {               
+                    }
+                    return checkCollision(tempHead, otherEntity);
+                }
+                return false;
+            });
+        
+            if (newHeadY >= screenSize[1] + entity.Centipede.radius || collides) {
+                if  (entity.Centipede.movementMode === "down") {
+                    entity.Centipede.movementMode = "downward";
+                    entity.Velocity.vx = Math.random() < 0.5 ? -2 : 2; // Random horizontal direction
+                    entity.Velocity.vy = 0; // Stop vertical movement
+                }
             }
-            return false;
-        });
 
-        const collidesWithCentipede = !isInCooldown && entities.some(otherEntity => {
-            if (otherEntity.Centipede && otherEntity.id !== head.id) {
-                const tempHead = { ...head, Position: { x: newHeadX, y: newHeadY } };
-                return checkCollision(tempHead, otherEntity);
-            }
-            return false;
-        });
+            // Handle collisions and screen boundaries
+            if (
+                newHeadX <= entity.Centipede.radius ||
+                newHeadX >= screenSize[0] - entity.Centipede.radius ||
+                collides
+            ) {
+                // Check if the collision is with a poisoned mushroom
+                const collidedWithPoisonedMushroom = entities.some(otherEntity => {
+                    if (otherEntity.Mushroom && otherEntity.Mushroom.poisoned === true) {
+                        const tempHead = { ...entity, Position: { x: newHeadX, y: newHeadY } };
+                        return checkCollision(tempHead, otherEntity);
+                    }
+                    return false;
+                });
 
-        if (
-            newHeadX <= head.Centipede.radius || // Left wall
-            newHeadX >= screenSize[0] - head.Centipede.radius || // Right wall
-            collidesWithMushroom || // Mushroom collision
-            collidesWithCentipede // Centipede collision
-        ) {
-            head.Velocity.vx *= -1; // Reverse horizontal direction
+                entity.Velocity.vx *= -1; // Reverse horizontal direction
 
-            if (head.movementMode === "downward") {
-                head.Position.y += 20; // Move down
-                if (head.Position.y >= lastRowY) {
-                    head.movementMode = "upward";
-                    head.Position.y = lastRowY;
+                if (collidedWithPoisonedMushroom) {
+                    // Enter "down" mode
+                    entity.Centipede.movementMode = "down";
+                    entity.Velocity.vx = 0; // Stop horizontal movement
+                    entity.Velocity.vy = 2; // Move straight down
 
-                    // Check if enough time has passed since the last centipede spawn
-                    const currentTime = Date.now();
-                    if (currentTime - lastCentipedeSpawnTime >= CENTIPEDE_SPAWN_COOLDOWN) {
-                        // Spawn a new 1-segment centipede when the centipede reaches the bottom row
-                        const spawnSide = Math.random() < 0.5 ? 'left' : 'right'; // Randomly choose left or right
-                        const newCentipedeX = spawnSide === 'left' ? 20 : canvas.width - 20; // Spawn at the edge of the screen
-                        const newCentipedeVelocity = spawnSide === 'left' ? 2 : -2; // Move left or right
-                        if (playerLives > 0) {
-                        const newCentipede = createEntity(
-                            Position(newCentipedeX, lastRowY), // Position at the bottom row
-                            Velocity(newCentipedeVelocity, 0), // Velocity (horizontal only)
-                            Centipede(head.Centipede.radius, null, null, "downward"), // 1-segment centipede
-                            Id(nextEntityId++),
-                            { path: [{ x: newCentipedeX, y: lastRowY }] } // Initialize path for the new centipede
-                        );
+                    // Determine the direction of movement
+                    const isMovingRight = entity.Velocity.vx > 0;
 
-                        entities.push(newCentipede); // Add the new centipede to the entities list
+                    // Clip to the correct column based on direction
+                    if (isMovingRight) {
+                        // If moving right, use Math.floor to clip to the current column
+                        const nearestColumn = Math.floor(entity.Position.x / cellSize) * cellSize;
+                        entity.Position.x = nearestColumn + cellSize / 2; // Center the centipede in the cell
+                    } else {
+                        // If moving left, use Math.ceil to clip to the next column
+                        const nearestColumn = Math.ceil(entity.Position.x / cellSize) * cellSize;
+                        entity.Position.x = nearestColumn - cellSize / 2; // Center the centipede in the cell
+                    }
+                } else if (entity.Centipede.movementMode === "downward") {
+                    entity.Position.y += 20;
+
+                    // Check if the centipede has reached the bottom row
+                    if (entity.Position.y >= lastRowY) {
+                        entity.Centipede.movementMode = "upward";
+                        entity.Position.y = lastRowY;
+
+                        // Spawn bottom row centipede
+                        if (currentTime - lastCentipedeSpawnTime >= CENTIPEDE_SPAWN_COOLDOWN && playerLives > 0) {
+                            addedCentipede.push(createBottomCentipede());
+                            lastCentipedeSpawnTime = currentTime;
                         }
-                        lastCentipedeSpawnTime = currentTime; // Update the last spawn time
+                    }
+                } else if (entity.Centipede.movementMode === "upward") {
+                    entity.Position.y -= 20;
+
+                    // Check if the centipede has reached the third row from the bottom
+                    if (entity.Position.y <= sixthRowFromBottomY) {
+                        entity.Centipede.movementMode = "downward";
+                        entity.Position.y = sixthRowFromBottomY;
                     }
                 }
+
+                entity.cooldown = 10;
             } else {
-                head.Position.y -= 20; // Move up
-                if (head.Position.y <= sixthRowFromBottomY) {
-                    head.movementMode = "downward";
-                    head.Position.y = sixthRowFromBottomY;
-                }
+                entity.Position.x = newHeadX;
+                entity.Position.y = newHeadY;
             }
 
-            head.cooldown = 10; // Set cooldown to prevent immediate direction changes
-        } else {
-            head.Position.x = newHeadX; // Move horizontally
+
+            if (entity.cooldown && entity.cooldown > 0) {
+                entity.cooldown--;
+            }
+
+            if (entity.path.length > 100) {
+                entity.path = entity.path.slice(-100);
+            }
         }
 
-        // Update movement mode for all segments
-        centipedeEntities.forEach(segment => {
-            if (segment.Centipede.mother_id === null) {
-                // Head segment
-                if (segment.Position.y >= lastRowY) {
-                    segment.Centipede.movementMode = "upward";
-                } else if (segment.Position.y <= sixthRowFromBottomY) {
-                    segment.Centipede.movementMode = "downward";
+        // Handle body segments
+        if (entity.Centipede.mother_id !== null) {
+            const mother = entities.find(e => e.id === entity.Centipede.mother_id);
+            if (mother && mother.path) {
+                entity.path = entity.path || [];
+
+                const pathIndex = mother.path.length - 10;
+                if (pathIndex >= 0 && pathIndex < mother.path.length) {
+                    const targetPosition = mother.path[pathIndex];
+                    entity.Position.x = targetPosition.x;
+                    entity.Position.y = targetPosition.y;
                 }
-            } else {
-                // Body segment: inherit movement mode from the head
-                const mother = centipedeEntities.find(e => e.id === segment.Centipede.mother_id);
-                if (mother) {
-                    segment.Centipede.movementMode = mother.Centipede.movementMode;
+
+                entity.path.push({ x: entity.Position.x, y: entity.Position.y });
+
+                if (entity.path.length > 100) {
+                    entity.path = entity.path.slice(-100);
                 }
             }
-        });
+        }
 
-        if (head.cooldown && head.cooldown > 0) {
-            head.cooldown--; // Decrease cooldown
-        }
-        if (head.path.length > 1000) {
-            head.path = head.path.slice(-1000); // Limit path length
-        }
+        return entity;
     });
-
-    // Update body segments to follow their mother segments
-    centipedeEntities.filter(e => e.Centipede.mother_id !== null).forEach(body => {
-        const [mother] = centipedeEntities.filter(e => e.id === body.Centipede.mother_id);
-        if (mother && mother.path) {
-            body.path = body.path || [];
-
-            const pathIndex = mother.path.length - 10;
-            if (pathIndex >= 0 && pathIndex < mother.path.length) {
-                const targetPosition = mother.path[pathIndex];
-                body.Position.x = targetPosition.x;
-                body.Position.y = targetPosition.y;
-            }
-
-            body.path.push({ x: body.Position.x, y: body.Position.y });
-
-            if (body.path.length > 100) {
-                body.path = body.path.slice(-100); // Limit path length
-            }
-        }
-    });
-
-    return entities;
+    return [...newEntities, ...addedCentipede];
 };
 
 
@@ -1236,7 +1245,7 @@ const fleaMovementSystem = (entities) => {
                 const gridX = Math.floor(entity.Position.x / cellSize) * cellSize;
                 const gridY = Math.floor(entity.Position.y / cellSize) * cellSize;
 
-                if (gridY <= lastRowY && isCellEmpty(gridX, gridY)) {
+                if (gridY <= lastRowY - 20 && isCellEmpty(gridX, gridY)) {
                     const newMushroom = createMushroom(gridX + cellSize / 2, gridY + cellSize / 2);                
                     mushroomsToAdd.push(newMushroom);
                 }
